@@ -1,0 +1,67 @@
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*.log
+
+# Windows metadata
+*.Zone.Identifier
+*:Zone.Identifier
+
+# Local Codex state
+.codex
+.codex/
+.codex-bin/
+
+# Dependency directories and build output
+node_modules/
+api-ledgov/node_modules/
+dashboard-publico/node_modules/
+blockchain-explorer/node_modules/
+blockchain-explorer/client/node_modules/
+.next/
+dashboard-publico/.next/
+build/
+dist/
+coverage/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!.env.sample
+api-ledgov/.env
+dashboard-publico/.env.local
+blockchain-explorer/.env
+blockchain-explorer/client/.env
+
+# Hyperledger Fabric test-network generated state
+fabric-samples/test-network/channel-artifacts/*
+!fabric-samples/test-network/channel-artifacts/.gitkeep
+fabric-samples/test-network/organizations/peerOrganizations/*
+fabric-samples/test-network/organizations/ordererOrganizations/*
+fabric-samples/test-network/organizations/fabric-ca/org1/*
+!fabric-samples/test-network/organizations/fabric-ca/org1/*.yaml
+fabric-samples/test-network/organizations/fabric-ca/org2/*
+!fabric-samples/test-network/organizations/fabric-ca/org2/*.yaml
+fabric-samples/test-network/organizations/fabric-ca/ordererOrg/*
+!fabric-samples/test-network/organizations/fabric-ca/ordererOrg/*.yaml
+fabric-samples/test-network/system-genesis-block/*
+!fabric-samples/test-network/system-genesis-block/.gitkeep
+fabric-samples/test-network/log.txt
+fabric-samples/test-network/*.tar.gz
+fabric-samples/test-network/prometheus-grafana/grafana_db/grafana.db
+
+# Explorer local environment and runtime output
+blockchain-explorer/client/build/
+blockchain-explorer/logs/
+blockchain-explorer/tmp/
+blockchain-explorer/wallet/
+
+# Local certificates and keys
+*.pem
+*.key
+*_sk
+priv_sk

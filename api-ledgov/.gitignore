@@ -1,7 +1,0 @@
-cat > .gitignore << 'EOF'
-node_modules/
-.env
-*.pem
-*.key
-coverage/
-EOF
