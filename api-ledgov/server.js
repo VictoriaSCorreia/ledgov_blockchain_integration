@@ -1,20 +1,19 @@
-// server.js — ponto de entrada da aplicação
+// server.js - application entry point
 'use strict';
 
 require('dotenv').config();
 
 const app = require('./src/app');
-const { obterGateway } = require('./src/fabric/gateway');
+const { getGateway } = require('./src/fabric/gateway');
 
 const PORT = process.env.PORT || 3000;
 
-async function iniciar() {
+async function start() {
   try {
-    // Testar conexão com a blockchain antes de abrir o servidor
+    // Validate the Fabric connection before accepting HTTP traffic.
     console.log('🔄 Conectando à rede Hyperledger Fabric...');
-    await obterGateway();
+    await getGateway();
 
-    // Só abrir o servidor após conexão bem-sucedida
     app.listen(PORT, () => {
       console.log('');
       console.log('╔════════════════════════════════════╗');
@@ -22,12 +21,13 @@ async function iniciar() {
       console.log(`║  http://localhost:${PORT}/api/v1      ║`);
       console.log('╚════════════════════════════════════╝');
       console.log('');
-      console.log('Endpoints disponíveis:');
+      console.log('Available endpoints:');
       console.log(`  GET    /api/v1/health`);
-      console.log(`  POST   /api/v1/transacoes`);
-      console.log(`  GET    /api/v1/transacoes`);
-      console.log(`  GET    /api/v1/transacoes/:id`);
-      console.log(`  GET    /api/v1/transacoes/orgao/:orgao`);
+      console.log(`  POST   /api/v1/transactions`);
+      console.log(`  GET    /api/v1/transactions`);
+      console.log(`  GET    /api/v1/transactions/:id`);
+      console.log(`  GET    /api/v1/transactions/agency/:agency`);
+      console.log(`  Legacy aliases under /api/v1/transacoes remain supported`);
       console.log('');
     });
   } catch (err) {
@@ -37,4 +37,4 @@ async function iniciar() {
   }
 }
 
-iniciar();
+start();

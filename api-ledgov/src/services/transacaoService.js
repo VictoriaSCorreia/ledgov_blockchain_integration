@@ -1,164 +1,164 @@
 // src/services/transacaoService.js
-// Lógica de negócio das transações — sem saber nada de HTTP ou blockchain
-// Essa camada pode ser testada unitariamente sem subir a rede
+// Transaction business rules with no HTTP concerns.
+// This layer is unit-testable without a running Fabric network.
 
 'use strict';
 
-const { invocarChaincode, consultarChaincode } = require('../fabric/gateway');
+const { invokeChaincode, evaluateChaincode } = require('../fabric/gateway');
 const crypto = require('node:crypto');
 
-// ──────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────
-
-// Gera um ID único para a transação
-// Formato: TRX-{timestamp}-{random} — rastreável e único
-function gerarIdTransacao() {
-  const ts = Date.now().toString(36).toUpperCase();
-  const rand = crypto.randomBytes(3).toString('hex').toUpperCase();
-  return `TRX-${ts}-${rand}`;
+function generateTransactionId() {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return `TRX-${timestamp}-${randomSuffix}`;
 }
 
-// Gera hash SHA-256 do objeto documento (simula hash de nota fiscal)
-// Em produção: recebe o hash real do documento já calculado pelo cliente
-function gerarHashDocumento(dados) {
+function generateDocumentHash(payload) {
   return crypto
     .createHash('sha256')
-    .update(JSON.stringify(dados))
+    .update(JSON.stringify(payload))
     .digest('hex');
 }
 
-// ──────────────────────────────────────────────
-// Erros de domínio específicos
-// ──────────────────────────────────────────────
+function normalizeTransactionRecord(record = {}) {
+  const rawAmount = record.amount ?? record.valor ?? 0;
 
-class TransacaoJaExisteError extends Error {
+  return {
+    id: record.id,
+    agency: record.agency ?? record.orgao ?? '',
+    supplier: record.supplier ?? record.fornecedor ?? '',
+    amount: Number(rawAmount),
+    commitmentNumber: record.commitmentNumber ?? record.numEmpenho ?? record.num_empenho ?? '',
+    documentHash: record.documentHash ?? record.hashDocumento ?? record.hash_documento ?? '',
+    digitalSignature: record.digitalSignature ?? record.assinatura ?? record.descricao ?? '',
+    timestamp: record.timestamp ?? '',
+  };
+}
+
+class TransactionAlreadyExistsError extends Error {
   constructor(id) {
-    super(`Transação ${id} já existe na blockchain`);
-    this.code = 'TRANSACAO_JA_EXISTE';
+    super(`Transaction ${id} already exists on the blockchain`);
+    this.code = 'TRANSACTION_ALREADY_EXISTS';
     this.statusCode = 409;
   }
 }
 
-class TransacaoNaoEncontradaError extends Error {
+class TransactionNotFoundError extends Error {
   constructor(id) {
-    super(`Transação ${id} não encontrada`);
-    this.code = 'TRANSACAO_NAO_ENCONTRADA';
+    super(`Transaction ${id} was not found`);
+    this.code = 'TRANSACTION_NOT_FOUND';
     this.statusCode = 404;
   }
 }
 
 class BlockchainError extends Error {
-  constructor(mensagem) {
-    super(`Erro na blockchain: ${mensagem}`);
+  constructor(message) {
+    super(`Blockchain error: ${message}`);
     this.code = 'BLOCKCHAIN_ERROR';
     this.statusCode = 500;
   }
 }
 
-// ──────────────────────────────────────────────
-// Funções do serviço
-// ──────────────────────────────────────────────
-
 /**
- * Registra uma nova transação governamental na blockchain.
+ * Records a new government transaction on the blockchain.
  *
- * @param {Object} dados - Dados da transação
- * @param {string} dados.orgao - Nome do órgão (ex: "Secretaria de Educação")
- * @param {string} dados.fornecedor - CNPJ/Nome do fornecedor
- * @param {number} dados.valor - Valor em reais
- * @param {string} dados.numEmpenho - Número do empenho orçamentário
- * @param {string} [dados.hashDocumento] - Hash SHA-256 da NF (opcional: gerado se ausente)
- * @param {string} [dados.assinatura] - Assinatura digital ICP-Brasil (opcional no protótipo)
- * @returns {Object} Transação registrada com ID gerado
+ * @param {Object} transactionData - Transaction data
+ * @param {string} transactionData.agency - Government agency name
+ * @param {string} transactionData.supplier - Supplier name or identifier
+ * @param {number} transactionData.amount - Amount in BRL
+ * @param {string} transactionData.commitmentNumber - Commitment number
+ * @param {string} [transactionData.documentHash] - Optional SHA-256 document hash
+ * @param {string} [transactionData.digitalSignature] - Optional signature used by the prototype
+ * @returns {Object} Recorded transaction with a generated ID
  */
-async function registrarTransacao(dados) {
-  const id = gerarIdTransacao();
-  const hashDoc = dados.hashDocumento || gerarHashDocumento(dados);
-  const assinatura = dados.assinatura || `SIM-${id}`; // Simplificado no protótipo
+async function recordTransaction(transactionData) {
+  const id = generateTransactionId();
+  const documentHash = transactionData.documentHash || generateDocumentHash(transactionData);
+  const digitalSignature = transactionData.digitalSignature || `SIM-${id}`;
 
   try {
-    const resultado = await invocarChaincode(
-      'RegistrarTransacao',
+    await invokeChaincode(
+      'RecordTransaction',
       id,
-      dados.orgao,
-      dados.fornecedor,
-      String(dados.valor),   // chaincode recebe strings
-      dados.numEmpenho,
-      hashDoc,
-      assinatura
+      transactionData.agency,
+      transactionData.supplier,
+      String(transactionData.amount),
+      transactionData.commitmentNumber,
+      documentHash,
+      digitalSignature
     );
 
     return {
       id,
-      ...dados,
-      hashDocumento: hashDoc,
-      status: 'REGISTRADO',
+      ...transactionData,
+      documentHash,
+      digitalSignature,
+      status: 'RECORDED',
       timestamp: new Date().toISOString(),
     };
-
   } catch (err) {
-    // Mapear erros do chaincode para erros de domínio
-    if (err.message?.includes('já registrada')) {
-      throw new TransacaoJaExisteError(id);
+    if (err.message?.includes('already recorded') || err.message?.includes('já registrada')) {
+      throw new TransactionAlreadyExistsError(id);
     }
-    if (err.message?.includes('BLOQUEADO')) {
-      // Repassar mensagem do smart contract diretamente — ela é informativa
-      const e = new Error(err.message);
-      e.code = 'SMART_CONTRACT_BLOQUEIO';
-      e.statusCode = 422;
-      throw e;
+    if (err.message?.includes('BLOCKED') || err.message?.includes('BLOQUEADO')) {
+      const blockedError = new Error(err.message);
+      blockedError.code = 'SMART_CONTRACT_BLOCKED';
+      blockedError.statusCode = 422;
+      throw blockedError;
     }
     throw new BlockchainError(err.message);
   }
 }
 
 /**
- * Consulta uma transação específica pelo ID.
+ * Returns one transaction by ID.
  *
- * @param {string} id - ID da transação (ex: TRX-ABC123-DEF456)
- * @returns {Object} Dados completos da transação
+ * @param {string} id - Transaction ID
+ * @returns {Object} Full transaction payload
  */
-async function consultarTransacao(id) {
+async function getTransaction(id) {
   try {
-    const resultado = await consultarChaincode('ConsultarTransacao', id);
-    return resultado;
+    const result = await evaluateChaincode('GetTransaction', id);
+    return normalizeTransactionRecord(result);
   } catch (err) {
-    if (err.message?.includes('não encontrada') || err.message?.includes('does not exist')) {
-      throw new TransacaoNaoEncontradaError(id);
+    if (
+      err.message?.includes('not found') ||
+      err.message?.includes('não encontrada') ||
+      err.message?.includes('does not exist')
+    ) {
+      throw new TransactionNotFoundError(id);
     }
     throw new BlockchainError(err.message);
   }
 }
 
 /**
- * Lista todas as transações de um órgão específico.
+ * Lists transactions for one agency.
  *
- * @param {string} orgao - Nome do órgão
- * @param {Object} [filtros] - Filtros opcionais
- * @param {number} [filtros.valorMin] - Valor mínimo
- * @param {number} [filtros.valorMax] - Valor máximo
- * @returns {Array} Lista de transações
+ * @param {string} agency - Agency name
+ * @param {Object} [filters] - Optional amount filters
+ * @param {number} [filters.minAmount] - Minimum amount
+ * @param {number} [filters.maxAmount] - Maximum amount
+ * @returns {Array} Filtered transaction list
  */
-async function listarPorOrgao(orgao, filtros = {}) {
+async function listTransactionsByAgency(agency, filters = {}) {
   try {
-    const resultado = await consultarChaincode('ListarTodasTransacoes');
+    const result = await evaluateChaincode('ListAllTransactions');
 
-    // O contrato atual só expõe a listagem completa; o filtro por órgão fica na API.
-    let transacoes = Array.isArray(resultado) ? resultado : [];
-    transacoes = transacoes.filter((t) => t.orgao === orgao);
+    let transactions = Array.isArray(result) ? result.map(normalizeTransactionRecord) : [];
+    transactions = transactions.filter((transaction) => transaction.agency === agency);
 
-    if (filtros.valorMin !== undefined) {
-      transacoes = transacoes.filter(t => parseFloat(t.valor) >= filtros.valorMin);
+    if (filters.minAmount !== undefined) {
+      transactions = transactions.filter((transaction) => transaction.amount >= filters.minAmount);
     }
-    if (filtros.valorMax !== undefined) {
-      transacoes = transacoes.filter(t => parseFloat(t.valor) <= filtros.valorMax);
+    if (filters.maxAmount !== undefined) {
+      transactions = transactions.filter((transaction) => transaction.amount <= filters.maxAmount);
     }
 
     return {
-      orgao,
-      total: transacoes.length,
-      transacoes,
+      agency,
+      total: transactions.length,
+      transactions,
     };
   } catch (err) {
     throw new BlockchainError(err.message);
@@ -166,15 +166,16 @@ async function listarPorOrgao(orgao, filtros = {}) {
 }
 
 /**
- * Lista todas as transações (para o dashboard público).
+ * Lists every transaction for the public dashboard.
  */
-async function listarTodasTransacoes() {
+async function listAllTransactions() {
   try {
-    const resultado = await consultarChaincode('ListarTodasTransacoes');
-    const transacoes = Array.isArray(resultado) ? resultado : [];
+    const result = await evaluateChaincode('ListAllTransactions');
+    const transactions = Array.isArray(result) ? result.map(normalizeTransactionRecord) : [];
+
     return {
-      total: transacoes.length,
-      transacoes,
+      total: transactions.length,
+      transactions,
     };
   } catch (err) {
     throw new BlockchainError(err.message);
@@ -182,12 +183,11 @@ async function listarTodasTransacoes() {
 }
 
 module.exports = {
-  registrarTransacao,
-  consultarTransacao,
-  listarPorOrgao,
-  listarTodasTransacoes,
-  // Exportar erros para uso nas rotas
-  TransacaoNaoEncontradaError,
-  TransacaoJaExisteError,
+  recordTransaction,
+  getTransaction,
+  listTransactionsByAgency,
+  listAllTransactions,
+  TransactionNotFoundError,
+  TransactionAlreadyExistsError,
   BlockchainError,
 };

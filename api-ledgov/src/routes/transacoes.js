@@ -1,6 +1,5 @@
-// src/routes/transacoes.js
-// Endpoints HTTP da API LEDGOV
-// Responsabilidade: receber request, validar formato, chamar service, retornar response
+// HTTP endpoints for the LEDGOV API.
+// This layer validates requests and delegates business rules to the service.
 
 'use strict';
 
@@ -8,129 +7,113 @@ const express = require('express');
 const router = express.Router();
 const service = require('../services/transacaoService');
 
-// ──────────────────────────────────────────────
-// Helper: resposta de erro padronizada
-// ──────────────────────────────────────────────
-function erroResponse(res, err) {
+function sendErrorResponse(res, err) {
   const statusCode = err.statusCode || 500;
   return res.status(statusCode).json({
-    erro: true,
-    codigo: err.code || 'ERRO_INTERNO',
-    mensagem: err.message,
+    error: true,
+    code: err.code || 'INTERNAL_ERROR',
+    message: err.message,
     timestamp: new Date().toISOString(),
   });
 }
 
-// ──────────────────────────────────────────────
-// POST /api/v1/transacoes
-// Registra uma nova transação na blockchain
-// ──────────────────────────────────────────────
 router.post('/', async (req, res) => {
-  const { orgao, fornecedor, valor, numEmpenho, hashDocumento, assinatura } = req.body;
+  const requestBody = req.body ?? {};
+  const agency = requestBody.agency ?? requestBody.orgao;
+  const supplier = requestBody.supplier ?? requestBody.fornecedor;
+  const amount = requestBody.amount ?? requestBody.valor;
+  const commitmentNumber = requestBody.commitmentNumber ?? requestBody.numEmpenho;
+  const documentHash = requestBody.documentHash ?? requestBody.hashDocumento;
+  const digitalSignature = requestBody.digitalSignature ?? requestBody.assinatura;
 
-  // Validação de campos obrigatórios
-  const camposFaltando = [];
-  if (!orgao)       camposFaltando.push('orgao');
-  if (!fornecedor)  camposFaltando.push('fornecedor');
-  if (!valor)       camposFaltando.push('valor');
-  if (!numEmpenho)  camposFaltando.push('numEmpenho');
+  const missingFields = [];
+  if (!agency) missingFields.push('agency');
+  if (!supplier) missingFields.push('supplier');
+  if (!amount) missingFields.push('amount');
+  if (!commitmentNumber) missingFields.push('commitmentNumber');
 
-  if (camposFaltando.length > 0) {
+  if (missingFields.length > 0) {
     return res.status(400).json({
-      erro: true,
-      codigo: 'CAMPOS_OBRIGATORIOS',
-      mensagem: `Campos obrigatórios ausentes: ${camposFaltando.join(', ')}`,
-      campos: camposFaltando,
+      error: true,
+      code: 'REQUIRED_FIELDS_MISSING',
+      message: `Missing required fields: ${missingFields.join(', ')}`,
+      fields: missingFields,
     });
   }
 
-  // Validação de tipos
-  const valorNumerico = parseFloat(valor);
-  if (isNaN(valorNumerico) || valorNumerico <= 0) {
+  const numericAmount = parseFloat(amount);
+  if (Number.isNaN(numericAmount) || numericAmount <= 0) {
     return res.status(400).json({
-      erro: true,
-      codigo: 'VALOR_INVALIDO',
-      mensagem: 'O campo valor deve ser um número positivo',
+      error: true,
+      code: 'INVALID_AMOUNT',
+      message: 'The amount field must be a positive number',
     });
   }
 
   try {
-    const transacao = await service.registrarTransacao({
-      orgao,
-      fornecedor,
-      valor: valorNumerico,
-      numEmpenho,
-      hashDocumento,
-      assinatura,
+    const transaction = await service.recordTransaction({
+      agency,
+      supplier,
+      amount: numericAmount,
+      commitmentNumber,
+      documentHash,
+      digitalSignature,
     });
 
-    // 201 Created — recurso criado com sucesso
     return res.status(201).json({
-      sucesso: true,
-      mensagem: 'Transação registrada na blockchain com sucesso',
-      dados: transacao,
+      success: true,
+      message: 'Transaction recorded on the blockchain',
+      data: transaction,
     });
-
   } catch (err) {
-    return erroResponse(res, err);
+    return sendErrorResponse(res, err);
   }
 });
 
-// ──────────────────────────────────────────────
-// GET /api/v1/transacoes
-// Lista todas as transações (dashboard público)
-// ──────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const resultado = await service.listarTodasTransacoes();
+    const result = await service.listAllTransactions();
     return res.json({
-      sucesso: true,
-      ...resultado,
+      success: true,
+      ...result,
     });
   } catch (err) {
-    return erroResponse(res, err);
+    return sendErrorResponse(res, err);
   }
 });
 
-// ──────────────────────────────────────────────
-// GET /api/v1/transacoes/orgao/:orgao
-// Lista o histórico de transações de um órgão
-// ──────────────────────────────────────────────
-router.get('/orgao/:orgao', async (req, res) => {
-  const filtros = {};
+router.get(['/agency/:agency', '/orgao/:agency'], async (req, res) => {
+  const filters = {};
 
-  // Filtros opcionais via query string:
-  // ?valorMin=1000&valorMax=50000
-  if (req.query.valorMin) filtros.valorMin = parseFloat(req.query.valorMin);
-  if (req.query.valorMax) filtros.valorMax = parseFloat(req.query.valorMax);
+  const minAmount = req.query.minAmount ?? req.query.valorMin;
+  const maxAmount = req.query.maxAmount ?? req.query.valorMax;
+
+  if (minAmount) filters.minAmount = parseFloat(minAmount);
+  if (maxAmount) filters.maxAmount = parseFloat(maxAmount);
 
   try {
-    const resultado = await service.listarPorOrgao(
-      decodeURIComponent(req.params.orgao),
-      filtros
+    const result = await service.listTransactionsByAgency(
+      decodeURIComponent(req.params.agency),
+      filters
     );
     return res.json({
-      sucesso: true,
-      ...resultado,
+      success: true,
+      ...result,
     });
   } catch (err) {
-    return erroResponse(res, err);
+    return sendErrorResponse(res, err);
   }
 });
 
-// ──────────────────────────────────────────────
-// GET /api/v1/transacoes/:id
-// Busca uma transação específica pelo ID
-// ──────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
-    const transacao = await service.consultarTransacao(req.params.id);
+    const transaction = await service.getTransaction(req.params.id);
     return res.json({
-      sucesso: true,
-      dados: transacao,
+      success: true,
+      data: transaction,
     });
   } catch (err) {
-    return erroResponse(res, err);
+    return sendErrorResponse(res, err);
   }
 });
 
